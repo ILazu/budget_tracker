@@ -1,19 +1,15 @@
 
 import os
 import io
-import calendar
 from datetime import datetime
 from typing import Tuple, List
 
 import streamlit as st
 import pandas as pd
 from openpyxl import Workbook, load_workbook
-from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 import matplotlib.pyplot as plt
 import qrcode
-from PIL import Image
-
 
 # -----------------------------
 # CONFIG
@@ -50,12 +46,14 @@ def openpyxl_get_ws(wb, sheet_name: str) -> Worksheet:
         return wb[sheet_name]
     else:
         ws = wb.create_sheet(sheet_name)
-        # Initialize headers for donations and expenses tables
-        # Donations table at top
+        # Initialize headers for donations and expenses tables with a spacer row between them
         ws["A1"] = "DONACIONES"
         ws["A2"] = "Fecha"
         ws["B2"] = "Descripción"
         ws["C2"] = "Monto"
+        # spacer row (row 3 and 4) to ensure clean separation
+        ws["A3"] = None
+        ws["A4"] = None
         # Expenses (Food & Snacks) table starting lower
         ws["A5"] = "GASTOS (Comida y Meriendas)"
         ws["A6"] = "Fecha"
@@ -65,21 +63,41 @@ def openpyxl_get_ws(wb, sheet_name: str) -> Worksheet:
 
 
 def read_table(ws: Worksheet, start_row: int) -> pd.DataFrame:
-    """Read a simple 3-column table (Fecha, Descripción, Monto) starting at start_row+1 (headers at start_row)."""
+    """Read a simple 3-column table (Fecha, Descripción, Monto) starting at start_row+1 (headers at start_row).
+    Stops when it meets an empty row, a section title, or another header row to avoid bleeding into the next table.
+    """
     rows = []
     row = start_row + 1
+    # Known section titles and header row content
+    SECTION_TITLES = {"DONACIONES", "GASTOS (Comida y Meriendas)"}
+    HEADER_ROW = ("Fecha", "Descripción", "Monto")
+
     while True:
         c1 = ws.cell(row=row, column=1).value
         c2 = ws.cell(row=row, column=2).value
         c3 = ws.cell(row=row, column=3).value
-        # stop if empty row
+
+        # Normalize to strings for comparisons without breaking numeric rows
+        c1s = str(c1).strip() if c1 is not None else None
+        c2s = str(c2).strip() if c2 is not None else None
+        c3s = str(c3).strip() if c3 is not None else None
+
+        # 1) stop if fully empty row
         if c1 is None and c2 is None and c3 is None:
             break
+        # 2) stop if we hit the name of another section title in column A
+        if c1s in SECTION_TITLES:
+            break
+        # 3) stop if we hit another header row (Fecha, Descripción, Monto)
+        if (c1s, c2s, c3s) == HEADER_ROW:
+            break
+
         rows.append([c1, c2, c3])
         row += 1
         # safety
         if row > 10000:
             break
+
     df = pd.DataFrame(rows, columns=["Fecha", "Descripción", "Monto"])
     # Normalize types
     if not df.empty:
@@ -256,14 +274,14 @@ st.pyplot(fig1)
 
 # Pie 2: Total budget vs amount spent (and remaining)
 fig2 = plt.figure(figsize=(4, 4))
-# Show Spent vs Remaining to be more informative
 plt.pie([exp_total, max(remaining, 0.0)], labels=["Gastado", "Restante"], autopct='%1.1f%%', startangle=90)
 plt.title("Uso del presupuesto")
 st.pyplot(fig2)
 
 # Download Excel
-with open(FILE_NAME, "rb") as f:
-    st.download_button("Descargar Excel del año", data=f, file_name=FILE_NAME, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+if os.path.exists(FILE_NAME):
+    with open(FILE_NAME, "rb") as f:
+        st.download_button("Descargar Excel del año", data=f, file_name=FILE_NAME, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # QR generator for public viewing link
 st.divider()
@@ -284,6 +302,6 @@ with col_qr1:
         st.download_button("Descargar QR", data=st.session_state["qr_bytes"], file_name="qr_dashboard.png", mime="image/png")
 
 with col_qr2:
-    st.info("Consejo: publica esta app en **Streamlit Community Cloud**, configura `ADMIN_CODE` en *Secrets* para proteger la edición, y comparte este QR con los estudiantes para que vean tablas y gráficas en modo lectura.")
+    st.info("Publica esta app en **Streamlit Community Cloud**, configura `ADMIN_CODE` en *Secrets* para proteger la edición, y comparte este QR con los estudiantes para que vean tablas y gráficas en modo lectura.")
 
 st.caption("© Student Council Budget • Construido con Streamlit, OpenPyXL, Matplotlib y QRCode")
